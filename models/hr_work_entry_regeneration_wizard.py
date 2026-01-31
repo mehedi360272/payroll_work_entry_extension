@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import datetime, time, timedelta
 from itertools import groupby
 
-from odoo import api, fields, models, _
+from odoo import models, fields, api, _
 from odoo.exceptions import ValidationError
 from dateutil.relativedelta import relativedelta
 
@@ -18,9 +18,16 @@ class HrWorkEntryRegenerationWizard(models.TransientModel):
         Leave = self.env["hr.leave"].sudo()
         Attendance = self.env["hr.attendance"].sudo()
 
-        absent_type = WorkEntryType.search([("external_code", "=", "ABS")], limit=1)
-        if not absent_type:
-            return
+        absent_types = WorkEntryType.search([("external_code", "=", "absent")], limit=2)
+        if not absent_types:
+            raise ValidationError(_(
+                "Work Entry Type with External Code = 'absent' is missing.\n"
+                "Please create it to generate Absent work entries."
+            ))
+        if len(absent_types) > 1:
+            raise ValidationError(
+                _("Multiple Work Entry Types found with External Code = 'absent'. Please keep only one."))
+        absent_type = absent_types[0]
 
         emp_ids = employees.ids
         if not emp_ids:
@@ -71,7 +78,7 @@ class HrWorkEntryRegenerationWizard(models.TransientModel):
 
         # ------------------------------------
         # C) Attendance days preload (DAY BASED)
-        #    - if any attendance exists on that day -> no ABS
+        #    - if any attendance exists on that day -> no absent
         # ------------------------------------
         att_days = set()
         atts = Attendance.search([
@@ -117,7 +124,7 @@ class HrWorkEntryRegenerationWizard(models.TransientModel):
                 if (emp_id, day) in att_days:
                     continue
 
-                # 3) already ABS exists -> skip
+                # 3) already absent exists -> skip
                 if (emp_id, day) in existing_abs_days:
                     continue
 

@@ -2,7 +2,8 @@
 import logging
 from collections import defaultdict
 
-from odoo import api, models
+from odoo import api, models, _
+from odoo.exceptions import ValidationError
 
 _logger = logging.getLogger(__name__)
 
@@ -56,6 +57,22 @@ class HrVersion(models.Model):
         for a in attendances:
             atts_by_emp[a.employee_id.id].append(a)
 
+        # ✅ Build day-level Absent map: emp_id -> set(dates)
+        absent_dates_by_emp = defaultdict(set)
+        for emp_id, atts in atts_by_emp.items():
+            for att in atts:
+                if not att.check_in:
+                    continue
+                if not hasattr(att, "direction_id") or not att.direction_id:
+                    continue
+                codes = [
+                    (d.code or "").strip().lower()
+                    for d in att.direction_id
+                    if (d.code or "").strip()
+                ]
+                if "absent" in codes:
+                    absent_dates_by_emp[emp_id].add(att.check_in.date())
+
         new_vals = []
         for vals in vals_list:
             # Only rewrite Attendance work entries that have date_start/date_stop
@@ -70,6 +87,21 @@ class HrVersion(models.Model):
             emp_id = vals["employee_id"]
             ws = vals["date_start"]  # UTC-naive (core expects this)
             we = vals["date_stop"]
+            day = ws.date()
+
+            # If Absent exists for this employee on this day -> ONLY ABS
+            if day in absent_dates_by_emp.get(emp_id, set()):
+                abs_type_id = we_type_map.get("absent")
+                if abs_type_id:
+                    v_abs = vals.copy()
+                    v_abs["work_entry_type_id"] = abs_type_id
+                    new_vals.append(v_abs)
+                if not abs_type_id:
+                    raise ValidationError(_(
+                        "Work Entry Type with External Code = 'absent' is missing.\n"
+                        "Please create it to generate Absent work entries."
+                    ))
+                continue
 
             # Find the first attendance that overlaps this interval
             matched_att = None
