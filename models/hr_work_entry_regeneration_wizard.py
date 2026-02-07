@@ -37,9 +37,7 @@ class HrWorkEntryRegenerationWizard(models.TransientModel):
         dt_start = datetime.combine(date_from, time.min)
         dt_stop = datetime.combine(date_to, time.max)
 
-        # ------------------------------------
         # A) Planning slots in range
-        # ------------------------------------
         slot_domain = [
             ("employee_id", "in", emp_ids),
             ("start_datetime", "<", dt_stop),
@@ -60,9 +58,7 @@ class HrWorkEntryRegenerationWizard(models.TransientModel):
             day = s.start_datetime.date()
             slot_days_by_emp[s.employee_id.id].add(day)
 
-        # ------------------------------------
         # B) Validated leave days preload
-        # ------------------------------------
         leave_days_by_emp = defaultdict(set)
         leaves = Leave.search([
             ("employee_id", "in", emp_ids),
@@ -76,10 +72,9 @@ class HrWorkEntryRegenerationWizard(models.TransientModel):
                 leave_days_by_emp[lv.employee_id.id].add(d)
                 d += timedelta(days=1)
 
-        # ------------------------------------
         # C) Attendance days preload (DAY BASED)
         #    - if any attendance exists on that day -> no absent
-        # ------------------------------------
+        
         att_days = set()
         atts = Attendance.search([
             ("employee_id", "in", emp_ids),
@@ -92,9 +87,7 @@ class HrWorkEntryRegenerationWizard(models.TransientModel):
             if att.check_in:
                 att_days.add((att.employee_id.id, att.check_in.date()))
 
-        # ------------------------------------
         # D) Duplicate prevent (DB)
-        # ------------------------------------
         existing_abs = WorkEntry.search([
             ("employee_id", "in", emp_ids),
             ("work_entry_type_id", "=", absent_type.id),
@@ -106,9 +99,7 @@ class HrWorkEntryRegenerationWizard(models.TransientModel):
         today = fields.Date.context_today(self)
         has_contract_field = "contract_id" in WorkEntry._fields
 
-        # ------------------------------------
         # E) Create ABSENT
-        # ------------------------------------
         for emp_id, days in slot_days_by_emp.items():
             emp = self.env["hr.employee"].browse(emp_id)
 
@@ -116,15 +107,15 @@ class HrWorkEntryRegenerationWizard(models.TransientModel):
                 if day > today:
                     continue
 
-                # 1) leave থাকলে skip
+                # 1) leave --> skip
                 if day in leave_days_by_emp.get(emp_id, set()):
                     continue
 
-                # 2) attendance থাকলে skip ✅ (new fix)
+                # 2) attendance --> skip  (new fix)
                 if (emp_id, day) in att_days:
                     continue
 
-                # 3) already absent exists -> skip
+                # 3) already absent exists --> skip
                 if (emp_id, day) in existing_abs_days:
                     continue
 
@@ -135,7 +126,7 @@ class HrWorkEntryRegenerationWizard(models.TransientModel):
                     "date": day,
                 }
 
-                # contract optional (contract না পেলে skip)
+                # contract optional (no contract --> skip)
                 if has_contract_field:
                     we_contract = WorkEntry.search([
                         ("employee_id", "=", emp_id),
